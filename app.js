@@ -1,5 +1,6 @@
 import * as store from './store.js';
-import { PLACES, HOLIDAYS } from './data.js';
+import { TRIPS, HOLIDAYS } from './data.js';
+import { PROVINCES } from './regions.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -37,6 +38,11 @@ const state = {
   saveTimer: null,
   saveStatus: '',
   placeMode: 'mid',
+  regionTab: 'list',
+  pickProv: null,
+  mapProv: null,
+  searchQuery: '',
+  searchResults: null,
   shuffling: false,
   newForm: null,
 };
@@ -182,11 +188,9 @@ function renderNew() {
     title: '', emoji: '💜', months: [], expected: 0, code: randomCode(), password: '', host: '',
   };
   const now = new Date();
-  const options = Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-  });
-  const byYear = options.reduce((acc, ym) => ((acc[ym.slice(0, 4)] ??= []).push(ym), acc), {});
+  const thisYm = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  const years = [0, 1, 2].map((i) => now.getFullYear() + i);
+  f.year ??= years[0];
   const counts = Array.from({ length: 9 }, (_, i) => i + 2);
   const custom = f.expected > 10;
 
@@ -206,11 +210,22 @@ function renderNew() {
       </div>
       <div class="field">
         <span class="field-label">약속 잡을 달 <span class="muted small">(여러 개 선택 가능)</span></span>
-        ${Object.entries(byYear).map(([y, yms]) => `
-          <p class="year">${y}년</p>
-          <div class="month-grid">
-            ${yms.map((ym) => `<button type="button" class="month-btn ${f.months.includes(ym) ? 'on' : ''}" data-ym="${ym}">${ymLabel(ym)}</button>`).join('')}
-          </div>`).join('')}
+        <p class="step-label">① 연도</p>
+        <div class="year-tabs">
+          ${years.map((y) => {
+            const n = f.months.filter((m) => m.startsWith(`${y}-`)).length;
+            return `<button type="button" class="year-btn ${f.year === y ? 'on' : ''}" data-year="${y}">${y}년${n ? `<span class="badge">${n}</span>` : ''}</button>`;
+          }).join('')}
+        </div>
+        <p class="step-label">② 월 <span class="muted small">(여러 달 선택 가능)</span></p>
+        <div class="month-grid">
+          ${Array.from({ length: 12 }, (_, i) => {
+            const ym = `${f.year}-${pad(i + 1)}`;
+            const past = ym < thisYm;
+            return `<button type="button" class="month-btn ${f.months.includes(ym) ? 'on' : ''}" data-ym="${ym}" ${past ? 'disabled' : ''}>${i + 1}월</button>`;
+          }).join('')}
+        </div>
+        <div class="picked" id="picked">${pickedMonths(f.months)}</div>
       </div>
       <div class="field">
         <span class="field-label">몇 명이 모여요? <span class="muted small">(모두 입력 완료하면 가능한 날이 열려요)</span></span>
@@ -252,11 +267,16 @@ function renderNew() {
     f.emoji = b.dataset.emoji;
     $$('[data-emoji]').forEach((x) => x.classList.toggle('on', x === b));
   }));
-  $$('[data-ym]').forEach((b) => b.addEventListener('click', () => {
-    const ym = b.dataset.ym;
-    f.months = f.months.includes(ym) ? f.months.filter((x) => x !== ym) : [...f.months, ym].sort();
-    b.classList.toggle('on');
+  $$('[data-year]').forEach((b) => b.addEventListener('click', () => {
+    f.year = Number(b.dataset.year);
+    renderNew();
   }));
+  const toggleMonth = (ym) => {
+    f.months = f.months.includes(ym) ? f.months.filter((x) => x !== ym) : [...f.months, ym].sort();
+    renderNew();
+  };
+  $$('[data-ym]').forEach((b) => b.addEventListener('click', () => toggleMonth(b.dataset.ym)));
+  $$('[data-unpick]').forEach((b) => b.addEventListener('click', () => toggleMonth(b.dataset.unpick)));
   $$('[data-count]').forEach((b) => b.addEventListener('click', () => {
     $$('[data-count]').forEach((x) => x.classList.toggle('on', x === b));
     const isCustom = b.dataset.count === 'custom';
@@ -297,6 +317,12 @@ function renderNew() {
       btn.disabled = false;
     }
   });
+}
+
+function pickedMonths(months) {
+  if (!months.length) return '<span class="small muted">아직 고른 달이 없어요</span>';
+  return `<span class="small muted">고른 달</span>` + months.map((ym) => `
+    <span class="picked-chip">${ym.slice(0, 4)}년 ${ymLabel(ym)}<button type="button" data-unpick="${ym}" aria-label="${ym} 빼기">×</button></span>`).join('');
 }
 
 // ---------- 참여하기 ----------
@@ -877,10 +903,20 @@ function bindResult() {
 }
 
 // ---------- 장소 정하기 탭 ----------
-const placeOf = (text) => {
-  const t = String(text || '').replace(/\s/g, '');
-  return t ? PLACES.find((p) => t.includes(p.name)) : null;
-};
+const COS36 = Math.cos((36 * Math.PI) / 180);
+const proj = (lat, lng) => [(lng - 124.5) * COS36 * 100, (38.7 - lat) * 100];
+const provByCode = (code) => PROVINCES.find((p) => p.code === code);
+const regionLabel = (prov, name) => (prov.metro && prov.regions.length === 1 ? name : `${prov.short} ${name}`);
+
+// 저장된 지역 → { label, lat, lng, detail }. 예전 버전의 문자열 지역도 시·도 이름으로 맞춰본다
+function regionOf(r) {
+  if (r && typeof r === 'object' && r.lat != null) return r;
+  if (typeof r === 'string' && r) {
+    const prov = PROVINCES.find((p) => r.includes(p.short));
+    if (prov) return { label: prov.short, lat: prov.lat, lng: prov.lng };
+  }
+  return null;
+}
 
 function distanceKm(a, b) {
   const rad = Math.PI / 180;
@@ -890,9 +926,20 @@ function distanceKm(a, b) {
   return 6371 * 2 * Math.asin(Math.sqrt(h));
 }
 
+function nearestRegion(lat, lng) {
+  let best = null;
+  for (const prov of PROVINCES) {
+    for (const r of prov.regions) {
+      const d = distanceKm({ lat, lng }, r);
+      if (!best || d < best.d) best = { d, prov, r };
+    }
+  }
+  return best;
+}
+
 function regionPeople() {
   return state.promise.people
-    .map((p) => ({ name: p.name, place: placeOf(p.data?.region) }))
+    .map((p) => ({ name: p.name, place: regionOf(p.data?.region) }))
     .filter((x) => x.place);
 }
 
@@ -911,11 +958,16 @@ const shuffle = (arr) => {
   return a;
 };
 
+// 중간 지역 후보: 특별·광역시는 도시 하나로, 도는 "시" 단위만 (교통이 편한 곳 위주)
+const MEET_POOL = PROVINCES.flatMap((prov) => (prov.metro
+  ? [{ label: prov.short === '세종' ? '세종시' : prov.short, lat: prov.lat, lng: prov.lng }]
+  : prov.regions.filter((r) => r.name.endsWith('시')).map((r) => ({ label: `${prov.short} ${r.name}`, lat: r.lat, lng: r.lng }))));
+
 function pickPlaces(mode) {
   const people = regionPeople();
   const from = people.map((x) => x.place);
   if (mode === 'mid') {
-    return PLACES
+    return MEET_POOL
       .map((p) => {
         const ds = from.map((f) => distanceKm(f, p));
         // 평균 거리와 가장 먼 사람의 거리를 함께 봐서 한 명만 멀리 오는 곳을 피한다
@@ -923,42 +975,56 @@ function pickPlaces(mode) {
       })
       .sort((a, b) => a.score - b.score)
       .slice(0, 3)
-      .map(({ p }) => ({ name: p.name, info: distInfo(p, from) }));
+      .map(({ p }) => ({ name: p.label, info: distInfo(p, from) }));
   }
   if (mode === 'ours') {
-    const unique = [...new Map(people.map((x) => [x.place.name, x.place])).values()];
-    return shuffle(unique).slice(0, 3).map((p) => ({
-      name: p.name,
-      info: `${people.filter((x) => x.place === p).map((x) => x.name).join(', ')}네 동네 · ${distInfo(p, from)}`,
+    const unique = [...new Map(people.map((x) => [x.place.label, x.place])).values()];
+    return shuffle(unique).slice(0, 3).map((pl) => ({
+      name: pl.label,
+      info: `${people.filter((x) => x.place.label === pl.label).map((x) => x.name).join(', ')}네 동네 · ${distInfo(pl, from)}`,
     }));
   }
-  return shuffle(PLACES.filter((p) => p.trip)).slice(0, 3).map((p) => ({
+  return shuffle(TRIPS).slice(0, 3).map((p) => ({
     name: p.name,
     info: [p.trip, distInfo(p, from)].filter(Boolean).join(' · '),
   }));
 }
 
+function setMyRegion(prov, name, lat, lng, detail = '') {
+  myData().region = { label: regionLabel(prov, name), lat, lng, ...(detail ? { detail } : {}) };
+  queueSave();
+  state.searchResults = null;
+  render();
+  toast(`내 지역을 "${regionLabel(prov, name)}"(으)로 정했어요 📍`);
+}
+
 function renderPlace() {
-  const mine = myData();
+  const mine = regionOf(myData().region);
   const people = state.promise.people;
   const result = state.promise.data.place;
-  const count = regionPeople().length;
-  const needRegion = state.placeMode !== 'trip' && count === 0;
-  const myPlace = placeOf(mine.region);
+  const needRegion = state.placeMode !== 'trip' && regionPeople().length === 0;
+  const tab = state.regionTab || 'list';
 
   return `
     <section class="card">
-      <h3>📍 내 지역</h3>
-      <form class="add-row" id="region-form">
-        <input name="region" list="place-list" placeholder="예: 서울, 부산, 대전" value="${esc(mine.region || '')}" maxlength="20">
-        <datalist id="place-list">${PLACES.map((p) => `<option value="${p.name}">`).join('')}</datalist>
-        <button class="btn primary" type="submit">저장</button>
-      </form>
-      ${mine.region && !myPlace ? '<p class="small warn">목록에 있는 도시 이름으로 적어주세요 (예: 서울, 수원, 광주)</p>' : ''}
+      <div class="row between wrap">
+        <h3>📍 내 지역</h3>
+        <span class="my-region ${mine ? '' : 'empty'}">${mine ? `${esc(mine.label)}${mine.detail ? ` <small>(${esc(mine.detail)})</small>` : ''}` : '아직 안 정했어요'}</span>
+      </div>
+      <div class="seg">
+        <button data-rtab="list" class="${tab === 'list' ? 'on' : ''}">🗂️ 목록에서</button>
+        <button data-rtab="map" class="${tab === 'map' ? 'on' : ''}">🗺️ 지도에서</button>
+        <button data-rtab="search" class="${tab === 'search' ? 'on' : ''}">🔍 주소 검색</button>
+      </div>
+      ${{ list: renderRegionList, map: renderRegionMap, search: renderRegionSearch }[tab]()}
+    </section>
+
+    <section class="card">
+      <h3>👥 친구들 지역</h3>
       <div class="region-list">
         ${people.map((p) => {
-          const pl = placeOf(p.data?.region);
-          return `<span class="region-chip ${pl ? '' : 'empty'}">${avatar(p, 22)} ${esc(p.name)} <b>${pl ? esc(pl.name) : '미입력'}</b></span>`;
+          const pl = regionOf(p.data?.region);
+          return `<span class="region-chip ${pl ? '' : 'empty'}">${avatar(p, 22)} ${esc(p.name)} <b>${pl ? esc(pl.label) : '미입력'}</b></span>`;
         }).join('')}
       </div>
     </section>
@@ -983,6 +1049,108 @@ function renderPlace() {
     </section>`;
 }
 
+function renderRegionList() {
+  const prov = provByCode(state.pickProv);
+  return `
+    <p class="step-label">① 시·도를 골라요</p>
+    <div class="prov-grid">
+      ${PROVINCES.map((p) => `<button class="prov-btn ${state.pickProv === p.code ? 'on' : ''}" data-prov="${p.code}">${p.short}</button>`).join('')}
+    </div>
+    ${prov ? `
+      <p class="step-label">② ${esc(prov.name)}의 ${prov.metro ? '구·군' : '시·군'}을 골라요</p>
+      <div class="sub-grid">
+        ${prov.regions.map((r) => `<button class="sub-btn" data-sub="${esc(r.name)}">${esc(r.name)}</button>`).join('')}
+      </div>` : ''}`;
+}
+
+function renderRegionMap() {
+  const prov = provByCode(state.mapProv);
+  // 전국 지도는 울릉도·백령도처럼 먼 섬을 빼고 본토와 제주에 맞춘다
+  const box = prov ? prov.bbox : [...proj(38.62, 125.05), ...proj(33.15, 129.6)];
+  const pad = Math.max(box[2] - box[0], box[3] - box[1]) * 0.06;
+  const vb = [box[0] - pad, box[1] - pad, box[2] - box[0] + pad * 2, box[3] - box[1] + pad * 2];
+  const r = Math.max(vb[2], vb[3]) * 0.018;
+  const pins = state.promise.people
+    .map((p) => ({ p, pl: regionOf(p.data?.region) }))
+    .filter((x) => x.pl)
+    .map(({ p, pl }) => {
+      const [x, y] = proj(pl.lat, pl.lng);
+      const me = p.name === state.me;
+      return `<g class="pin ${me ? 'me' : ''}"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(me ? r * 1.3 : r).toFixed(2)}"></circle>
+        <text x="${x.toFixed(1)}" y="${(y + r * 0.42).toFixed(1)}" font-size="${(r * 1.2).toFixed(2)}">${esc([...p.name][0])}</text></g>`;
+    }).join('');
+  return `
+    <p class="step-label">${prov ? `② ${esc(prov.name)}에서 내 동네를 눌러요` : '① 시·도를 눌러서 확대해요'}</p>
+    <div class="map-wrap">
+      ${prov ? '<button class="map-back" id="map-back">← 전국 지도</button>' : ''}
+      <svg id="map" viewBox="${vb.map((v) => v.toFixed(1)).join(' ')}" role="img" aria-label="${prov ? esc(prov.name) : '대한민국'} 지도">
+        ${prov
+          ? PROVINCES.filter((p) => p !== prov).map((p) => `<path class="ctx" d="${p.path}"></path>`).join('')
+            + prov.regions.map((rg) => `<path class="area" data-sub="${esc(rg.name)}" d="${rg.path}"><title>${esc(rg.name)}</title></path>`).join('')
+          : PROVINCES.map((p, i) => `<path class="area" style="--fill:${AVATAR_COLORS[i % AVATAR_COLORS.length]}" data-prov="${p.code}" d="${p.path}"><title>${esc(p.name)}</title></path>`).join('')}
+        ${pins}
+      </svg>
+      <p class="map-hover small muted" id="map-hover">${prov ? '' : '서울·인천처럼 작은 곳은 확대한 뒤 골라요'}</p>
+    </div>`;
+}
+
+function renderRegionSearch() {
+  const results = state.searchResults;
+  return `
+    <form class="add-row search-row" id="search-form">
+      <input name="q" placeholder="주소나 장소 (예: 수원역, 해운대구 우동)" maxlength="60" value="${esc(state.searchQuery || '')}">
+      <button class="btn primary" type="submit">검색</button>
+    </form>
+    <button class="chip-btn locate" id="locate">📍 지금 내 위치로 정하기</button>
+    ${results === 'loading' ? '<p class="small muted">찾는 중…</p>' : ''}
+    ${typeof results === 'string' && results !== 'loading' ? `<p class="small warn">${esc(results)}</p>` : ''}
+    ${Array.isArray(results) ? (results.length ? `
+      <ul class="search-results">
+        ${results.map((x, i) => `
+          <li><button data-result="${i}">
+            <b>${esc(x.title)}</b><span class="small muted">${esc(x.address)}</span>
+            <span class="pill">${esc(x.snap)}</span>
+          </button></li>`).join('')}
+      </ul>` : '<p class="small muted">검색 결과가 없어요. 동네 이름이나 역 이름으로 다시 찾아보세요.</p>') : ''}
+    <p class="small muted">검색은 OpenStreetMap을 써요. 찾은 위치에서 가장 가까운 시·군·구로 정해져요.</p>`;
+}
+
+async function searchAddress(q) {
+  state.searchQuery = q;
+  state.searchResults = 'loading';
+  render();
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=kr&accept-language=ko&limit=6&q=${encodeURIComponent(q)}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(res.status);
+    const list = await res.json();
+    state.searchResults = list.map((x) => {
+      const lat = Number(x.lat), lng = Number(x.lon);
+      const near = nearestRegion(lat, lng);
+      const parts = x.display_name.split(',').map((s) => s.trim());
+      return { lat, lng, title: x.name || parts[0], address: parts.slice(1, 4).join(', '), prov: near.prov.code, sub: near.r.name, snap: regionLabel(near.prov, near.r.name) };
+    });
+  } catch {
+    state.searchResults = '지금은 주소 검색을 할 수 없어요. 인터넷 연결을 확인하거나 목록·지도에서 골라주세요.';
+  }
+  render();
+}
+
+function locateMe() {
+  if (!navigator.geolocation) { toast('이 기기에서는 위치를 쓸 수 없어요'); return; }
+  toast('위치를 확인하는 중…');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const { latitude: lat, longitude: lng } = pos.coords;
+      const near = nearestRegion(lat, lng);
+      if (near.d > 60) { toast('한국 밖이거나 위치가 정확하지 않아요. 목록에서 골라주세요'); return; }
+      setMyRegion(near.prov, near.r.name, lat, lng, '현재 위치');
+    },
+    () => toast('위치 권한이 없어서 확인하지 못했어요. 목록이나 지도에서 골라주세요'),
+    { enableHighAccuracy: false, timeout: 10000 },
+  );
+}
+
 function podium(picks) {
   const medals = ['🥇', '🥈', '🥉'];
   return `
@@ -998,13 +1166,51 @@ function podium(picks) {
 }
 
 function bindPlace() {
-  $('#region-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    myData().region = e.target.region.value.trim();
-    queueSave();
+  $$('[data-rtab]').forEach((b) => b.addEventListener('click', () => {
+    state.regionTab = b.dataset.rtab;
     render();
-    toast('지역을 저장했어요 📍');
+  }));
+  // 목록
+  $$('.prov-btn[data-prov]').forEach((b) => b.addEventListener('click', () => {
+    state.pickProv = b.dataset.prov;
+    const prov = provByCode(state.pickProv);
+    if (prov.regions.length === 1) { setMyRegion(prov, prov.regions[0].name, prov.regions[0].lat, prov.regions[0].lng); return; }
+    render();
+  }));
+  $$('.sub-btn[data-sub]').forEach((b) => b.addEventListener('click', () => {
+    const prov = provByCode(state.pickProv);
+    const r = prov.regions.find((x) => x.name === b.dataset.sub);
+    setMyRegion(prov, r.name, r.lat, r.lng);
+  }));
+  // 지도
+  $('#map-back')?.addEventListener('click', () => { state.mapProv = null; render(); });
+  $$('#map .area').forEach((el) => {
+    el.addEventListener('mouseenter', () => { $('#map-hover').textContent = el.querySelector('title').textContent; });
+    el.addEventListener('click', () => {
+      if (el.dataset.prov) {
+        const prov = provByCode(el.dataset.prov);
+        if (prov.regions.length === 1) { setMyRegion(prov, prov.regions[0].name, prov.regions[0].lat, prov.regions[0].lng); return; }
+        state.mapProv = prov.code;
+        render();
+        return;
+      }
+      const prov = provByCode(state.mapProv);
+      const r = prov.regions.find((x) => x.name === el.dataset.sub);
+      setMyRegion(prov, r.name, r.lat, r.lng);
+    });
   });
+  // 주소 검색
+  $('#search-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const q = e.target.q.value.trim();
+    if (q) searchAddress(q);
+  });
+  $('#locate')?.addEventListener('click', locateMe);
+  $$('[data-result]').forEach((b) => b.addEventListener('click', () => {
+    const x = state.searchResults[Number(b.dataset.result)];
+    setMyRegion(provByCode(x.prov), x.sub, x.lat, x.lng, x.title);
+  }));
+
   $$('[data-mode]').forEach((b) => b.addEventListener('click', () => {
     state.placeMode = b.dataset.mode;
     render();
@@ -1019,11 +1225,11 @@ async function pick() {
   state.shuffling = true;
   $('#pick').disabled = true;
   const box = $('#podium');
-  const pool = mode === 'trip' ? PLACES.filter((p) => p.trip) : PLACES;
+  const pool = mode === 'trip' ? TRIPS.map((p) => p.name) : MEET_POOL.map((p) => p.label);
   const t0 = performance.now();
   await new Promise((resolve) => {
     const tick = () => {
-      const fake = shuffle(pool).slice(0, picks.length).map((p) => ({ name: p.name, info: '두구두구…' }));
+      const fake = shuffle(pool).slice(0, picks.length).map((name) => ({ name, info: '두구두구…' }));
       box.innerHTML = podium(fake);
       box.classList.add('rolling');
       if (performance.now() - t0 < 1400) setTimeout(tick, 90);
