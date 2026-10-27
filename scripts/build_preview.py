@@ -9,7 +9,11 @@ def strip(js):
     return re.sub(r"^export ", "", js, flags=re.M)
 store = strip(open(src+'store.js').read())
 names = re.findall(r"^export (?:async function|function|const) (\w+)", open(src+'store.js').read(), flags=re.M)
+import base64, glob
+icons = {os.path.basename(f)[:-5]: 'data:image/webp;base64,' + base64.b64encode(open(f, 'rb').read()).decode()
+         for f in sorted(glob.glob(src + 'assets/icons/*.webp'))}
 parts = [
+  "window.PROMISE_CAL_ICONS = " + __import__('json').dumps(icons) + ";",
   "window.PROMISE_CAL_MEMORY_ROUTER = true;",
   # 미리보기는 외부 서버에 접속할 수 없으므로 항상 체험 모드(빈 설정)로 만든다
   "const SUPABASE_URL = '';\nconst SUPABASE_ANON_KEY = '';",

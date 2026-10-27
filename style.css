@@ -572,3 +572,24 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .confirm-form label { margin: 10px 0; }
 .confirm-form input, .confirm-form select { background: #fff; }
 @media (max-width: 360px) { .cal-buttons { grid-template-columns: 1fr; } }
+
+/* 3D 아이콘 */
+.ico3d { display: inline-block; flex-shrink: 0; vertical-align: middle; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+.hero-ico { display: block; margin: 0 auto 6px; filter: drop-shadow(0 8px 14px rgb(143 114 238 / 22%)); }
+.with-ico { display: inline-flex; align-items: center; gap: 6px; }
+h2.with-ico, h3.with-ico, h4.with-ico, p.with-ico { display: flex; }
+h3.center.with-ico, p.where.with-ico { justify-content: center; }
+.btn .ico3d { margin: -6px 0; }
+.tab { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.tab .ico3d { margin: -4px 0; }
+.tab.on .ico3d { filter: drop-shadow(0 0 2px rgb(255 255 255 / 70%)); }
+.plus .ico3d { width: 40px; height: 40px; }
+.mascot .ico3d { width: 120px; height: 120px; filter: drop-shadow(0 10px 18px rgb(143 114 238 / 25%)); }
+.mascot span { right: -8px; top: 4px; }
+.legend .ico3d, .note .ico3d { margin: -3px 0; }
+.group h4 { display: flex; align-items: center; gap: 6px; }
+.time-row .ico3d { margin: -4px 0; }
+.seg .ico3d { margin: -4px 2px -4px 0; }
+.key-card .hero-ico, .confirmed .hero-ico { margin-bottom: 2px; }
+@media (prefers-reduced-motion: reduce) { .mascot, .bounce, .mascot span { animation: none; } }
+@media (max-width: 400px) { .tab .ico3d { width: 18px; height: 18px; } }

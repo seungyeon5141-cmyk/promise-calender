@@ -76,6 +76,9 @@ function randomCode() {
   return words[Math.floor(Math.random() * words.length)] + String(Math.floor(Math.random() * 9000) + 1000);
 }
 
+// 3D 아이콘 (assets/icons). 미리보기처럼 파일을 못 불러오는 곳에서는 window.PROMISE_CAL_ICONS 의 data URI 를 쓴다
+const icon = (name, size = 24, cls = '') => `<img class="ico3d ${cls}" src="${window.PROMISE_CAL_ICONS?.[name] || `assets/icons/${name}.webp`}" width="${size}" height="${size}" alt="" aria-hidden="true">`;
+
 const normCode = (s) => String(s || '').trim().replace(/\s+/g, '').toLowerCase();
 
 // ---------- 공통 UI ----------
@@ -157,16 +160,16 @@ function renderHome() {
   app.innerHTML = `
     ${topbar()}
     <section class="hero">
-      <div class="mascot">🐰<span>💜</span></div>
+      <div class="mascot">${icon('friends', 120)}<span>💜</span></div>
       <h1>약속잡기</h1>
       <p class="muted">약속마다 친구들을 따로 모아서<br>날짜도, 장소도 한 번에 정해요</p>
     </section>
     <a href="#/new" class="new-btn">
-      <span class="plus">＋</span>
+      <span class="plus">${icon('calendar', 40)}</span>
       <span><b>새 약속 만들기</b><br><span class="small">방장이 참여코드와 비밀번호를 정해요</span></span>
     </a>
     <a href="#/join" class="join-btn card">
-      <span class="plus soft">🔑</span>
+      <span class="plus soft">${icon('invite', 40)}</span>
       <span><b>참여코드로 들어가기</b><br><span class="small muted">친구한테 받은 코드와 비밀번호를 입력해요</span></span>
     </a>
     ${recent.length ? `
@@ -202,7 +205,7 @@ function renderNew() {
     ${topbar()}
     <a href="#" class="back">← 처음으로</a>
     <form class="card" id="new-form" novalidate>
-      <h2>✨ 새 약속</h2>
+      <h2 class="with-ico">${icon('calendar', 34)} 새 약속</h2>
       <label>약속 이름
         <input name="title" required maxlength="30" placeholder="예: 대학 동기 송년회" value="${esc(f.title)}">
       </label>
@@ -243,7 +246,7 @@ function renderNew() {
         </div>
       </div>
       <div class="field key-box">
-        <span class="field-label">🔑 친구들이 들어올 때 쓸 정보</span>
+        <span class="field-label with-ico">${icon('invite', 26)} 친구들이 들어올 때 쓸 정보</span>
         <label>참여코드
           <div class="add-row">
             <input name="code" required maxlength="20" value="${esc(f.code)}" autocomplete="off">
@@ -335,7 +338,7 @@ function renderJoin(prefill, message = '') {
     ${topbar()}
     <a href="#" class="back">← 처음으로</a>
     <form class="card join-card" id="join-form">
-      <div class="big-emoji">🔑</div>
+      ${icon('invite', 88, 'hero-ico')}
       <h2>약속에 들어가기</h2>
       <p class="small muted">방장에게 받은 참여코드와 비밀번호를 입력해요</p>
       <label>참여코드
@@ -463,11 +466,11 @@ function render() {
           ${p.data.expected > p.people.length ? `<span class="person ghost"><span class="avatar" style="--size:30px">?</span><span>${p.data.expected - p.people.length}명 더</span></span>` : ''}
         </div>
       </div>
-      <button class="btn invite" id="invite">💌 참여코드 공유하기</button>
+      <button class="btn invite" id="invite">${icon('invite', 26)} 참여코드 공유하기</button>
     </header>
     ${state.justCreated && state.me === p.data.host ? `
       <section class="card key-card">
-        <h3>🎉 약속이 만들어졌어요!</h3>
+        ${icon('invite', 72, 'hero-ico')}<h3>약속이 만들어졌어요!</h3>
         <p class="small muted">아래 정보를 단톡방에 보내면 친구들이 들어올 수 있어요</p>
         <div class="key-row"><span>참여코드</span><b>${esc(p.code)}</b></div>
         <div class="key-row"><span>비밀번호</span><b>${esc(state.password)}</b></div>
@@ -475,9 +478,9 @@ function render() {
     ${state.me ? confirmedBanner() : ''}
     ${state.me ? `
       <nav class="tabs">
-        ${tabBtn('mine', '📅 내 일정')}
-        ${tabBtn('result', `💜 가능한 날${allDone() ? '' : ` <small>${done}/${total}</small>`}`)}
-        ${tabBtn('place', '📍 장소 정하기')}
+        ${tabBtn('mine', `${icon('calendar', 22)} 내 일정`)}
+        ${tabBtn('result', `${icon('check', 22)} 가능한 날${allDone() ? '' : ` <small>${done}/${total}</small>`}`)}
+        ${tabBtn('place', `${icon('pin', 22)} 장소 정하기`)}
       </nav>
       <main>${{ mine: renderMine, result: renderResult, place: renderPlace }[state.tab]()}</main>`
     : renderWhoAmI()}`;
@@ -501,7 +504,7 @@ function renderWhoAmI() {
   const people = state.promise.people;
   return `
     <section class="card whoami">
-      <div class="big-emoji">👋</div>
+      ${icon('friends', 96, 'hero-ico')}
       <h2>이름을 알려주세요!</h2>
       <form class="add-row" id="name-form">
         <input name="name" maxlength="12" placeholder="내 이름 (예: 민지)" required>
@@ -597,7 +600,7 @@ function renderMine() {
         <span><i class="sw all"></i>종일</span>
         <span><i class="sw am"></i>오전</span>
         <span><i class="sw pm"></i>오후</span>
-        <span>📝 메모</span>
+        <span>${icon('chat', 18)} 메모</span>
       </div>
     </section>
     ${state.promise.data.months.map((ym) => `
@@ -621,8 +624,8 @@ function renderMine() {
       </section>`).join('')}
     <div class="done-bar">
       ${mine.done
-        ? `<button class="btn soft block" id="undone">✅ 입력 완료! <span class="small">(눌러서 다시 수정 중으로)</span></button>`
-        : `<button class="btn primary block" id="done">다 표시했어요! 입력 완료 ✅</button>`}
+        ? `<button class="btn soft block" id="undone">${icon('check', 26)} 입력 완료! <span class="small">(눌러서 다시 수정 중으로)</span></button>`
+        : `<button class="btn primary block" id="done">${icon('vote', 30)} 다 표시했어요! 입력 완료</button>`}
     </div>
     <p class="center"><button class="link small muted" id="leave">${isOwner ? '🗑️ 이 약속 삭제하기' : '🚪 이 약속에서 나가기'}</button></p>`;
 }
@@ -702,9 +705,9 @@ function renderSheet() {
           </button>`).join('')}
       </div>
       <div class="time-row">
-        <span>⏰</span>
+        ${icon('clock', 30)}
         <select id="h" aria-label="시각">
-          <option value="">시간 선택 안 함</option>
+          <option value="">시간 없음</option>
           ${hours.map((h) => `<option value="${h}" ${String(d.h) === String(h) ? 'selected' : ''}>${h}시</option>`).join('')}
         </select>
         <select id="t" aria-label="까지/부터">
@@ -819,16 +822,16 @@ function renderResult() {
   return `
     ${!ready ? '<div class="notice">👀 미리 보기 중이에요. 아직 입력 완료하지 않은 친구가 있어요.</div>' : ''}
     <section class="card result-hero">
-      <div class="big-emoji">${any ? '🎉' : '🥲'}</div>
+      ${any ? icon('check', 84, 'hero-ico pop') : '<div class="big-emoji">🥲</div>'}
       <h2>${groups.full.length ? `모두 하루 종일 되는 날 <b>${groups.full.length}일</b>!` : any ? '반나절이라도 모두 되는 날이 있어요' : '모두 되는 날이 없어요'}</h2>
       <p class="small muted">날짜를 누르면 친구들의 메모를 볼 수 있어요</p>
     </section>
     <div id="detail">${state.selected ? detail(state.selected) : ''}</div>
     ${any ? `
       <section class="card">
-        ${group('full', '☀️ 하루 종일 모두 돼요', '분홍 테두리는 주말·공휴일이에요')}
-        ${group('am', '🌅 오전에만 모두 돼요', '점심 전 브런치 어때요?')}
-        ${group('pm', '🌙 오후에만 모두 돼요', '저녁 약속으로 딱!')}
+        ${group('full', `${icon('calendar', 28)} 하루 종일 모두 돼요`, '분홍 테두리는 주말·공휴일이에요')}
+        ${group('am', `${icon('coffee', 28)} 오전에만 모두 돼요`, '점심 전 브런치 어때요?')}
+        ${group('pm', `${icon('dinner', 28)} 오후에만 모두 돼요`, '저녁 약속으로 딱!')}
       </section>` : `
       <section class="card">
         <h4>그나마 많이 되는 날 TOP 5</h4>
@@ -864,7 +867,7 @@ function renderWaiting() {
   const mine = myData();
   return `
     <section class="card waiting">
-      <div class="big-emoji bounce">⏳</div>
+      ${icon('vote', 96, 'hero-ico bounce')}
       <h2>모두 입력하면 가능한 날이 열려요!</h2>
       <div class="progress"><span style="width:${Math.round((done / need) * 100)}%"></span></div>
       <p class="small muted">${done} / ${need}명 입력 완료</p>
@@ -887,7 +890,7 @@ function detail(k) {
   const people = state.promise.people.map((p) => {
     const n = d.notes.find((x) => x.name === p.name);
     const st = n ? STATUS[n.s] : STATUS.ok;
-    return `<li><span class="ico">${st.icon}</span><b>${esc(p.name)}</b> <span class="small">${n && n.s !== 'ok' ? st.label : '돼요'}</span>${n?.note ? `<span class="note">📝 ${esc(n.note)}</span>` : ''}</li>`;
+    return `<li><span class="ico">${st.icon}</span><b>${esc(p.name)}</b> <span class="small">${n && n.s !== 'ok' ? st.label : '돼요'}</span>${n?.note ? `<span class="note">${icon('chat', 18)} ${esc(n.note)}</span>` : ''}</li>`;
   });
   return `
     <section class="card detail">
@@ -910,14 +913,14 @@ function confirmForm(k) {
   const placeTop = state.promise.data.place?.picks?.[0]?.name || '';
   return `
     <form class="confirm-form" id="confirm-form">
-      <h4>📌 ${fmtDay(k)}로 확정</h4>
-      <label>몇 시에 만나요?
+      <h4 class="with-ico">${icon('check', 26)} ${fmtDay(k)}로 확정</h4>
+      <label><span class="with-ico">${icon('clock', 22)} 몇 시에 만나요?</span>
         <select id="confirm-time">
           <option value="">시간 미정 (하루 종일)</option>
           ${TIMES.map((t) => `<option ${d.time === t ? 'selected' : ''}>${t}</option>`).join('')}
         </select>
       </label>
-      <label>어디서 만나요?
+      <label><span class="with-ico">${icon('pin', 22)} 어디서 만나요?</span>
         <input id="confirm-place" maxlength="40" value="${esc(d.place ?? placeTop)}" placeholder="예: 대전역 성심당 앞">
       </label>
       <div class="sheet-actions">
@@ -1027,15 +1030,15 @@ function confirmedBanner() {
   if (!c) return '';
   return `
     <section class="card confirmed">
-      <p class="eyebrow">📌 약속이 확정됐어요</p>
+      ${icon('check', 64, 'hero-ico')}<p class="eyebrow">약속이 확정됐어요</p>
       <p class="when">${fmtDay(c.date)}${c.time ? ` ${c.time}` : ''}</p>
-      ${c.place ? `<p class="where">📍 ${esc(c.place)}</p>` : ''}
+      ${c.place ? `<p class="where with-ico">${icon('pin', 22)} ${esc(c.place)}</p>` : ''}
       <div class="cal-buttons">
         <a class="btn gcal" href="${esc(googleCalendarUrl())}" target="_blank" rel="noopener">
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3" fill="#fff" stroke="#4285F4" stroke-width="2"/><rect x="3" y="4" width="18" height="5" rx="2" fill="#4285F4"/><text x="12" y="18.5" font-size="8" font-weight="700" text-anchor="middle" fill="#4285F4">31</text></svg>
           Google 캘린더
         </a>
-        <button class="btn" id="ics">📱 기본 캘린더 앱</button>
+        <button class="btn" id="ics">${icon('bell', 22)} 기본 캘린더 앱</button>
       </div>
       <p class="small muted">${esc(c.by)} 님이 확정 · <button class="link small" id="unconfirm">확정 취소</button></p>
     </section>`;
@@ -1174,19 +1177,19 @@ function renderPlace() {
   return `
     <section class="card">
       <div class="row between wrap">
-        <h3>📍 내 지역</h3>
+        <h3 class="with-ico">${icon('pin', 28)} 내 지역</h3>
         <span class="my-region ${mine ? '' : 'empty'}">${mine ? `${esc(mine.label)}${mine.detail ? ` <small>(${esc(mine.detail)})</small>` : ''}` : '아직 안 정했어요'}</span>
       </div>
       <div class="seg">
         <button data-rtab="list" class="${tab === 'list' ? 'on' : ''}">🗂️ 목록에서</button>
-        <button data-rtab="map" class="${tab === 'map' ? 'on' : ''}">🗺️ 지도에서</button>
+        <button data-rtab="map" class="${tab === 'map' ? 'on' : ''}">${icon('map', 20)} 지도에서</button>
         <button data-rtab="search" class="${tab === 'search' ? 'on' : ''}">🔍 주소 검색</button>
       </div>
       ${{ list: renderRegionList, map: renderRegionMap, search: renderRegionSearch }[tab]()}
     </section>
 
     <section class="card">
-      <h3>👥 친구들 지역</h3>
+      <h3 class="with-ico">${icon('friends', 30)} 친구들 지역</h3>
       <div class="region-list">
         ${people.map((p) => {
           const pl = regionOf(p.data?.region);
@@ -1211,7 +1214,7 @@ function renderPlace() {
 
     <section class="card podium-card" id="podium">
       ${result ? podium(result.picks) + `<p class="small muted center">${PLACE_MODES[result.mode].icon} ${PLACE_MODES[result.mode].title} · ${esc(result.by)} 님이 뽑았어요</p>`
-        : '<div class="empty"><div class="big-emoji">🗺️</div><p class="muted">추천 지역 1~3위가 여기에 나와요</p></div>'}
+        : `<div class="empty">${icon('map', 88, 'hero-ico')}<p class="muted">추천 지역 1~3위가 여기에 나와요</p></div>`}
     </section>`;
 }
 
@@ -1320,7 +1323,7 @@ function locateMe() {
 function podium(picks) {
   const medals = ['🥇', '🥈', '🥉'];
   return `
-    <h3 class="center">추천 지역</h3>
+    <h3 class="center with-ico">${icon('map', 30)} 추천 지역</h3>
     <ol class="podium">
       ${picks.map((x, i) => `
         <li class="rank-${i + 1}">

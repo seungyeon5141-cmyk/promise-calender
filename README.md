@@ -43,6 +43,7 @@ python3 -m http.server 8000   # http://localhost:8000
 | `app.js` | 화면(홈·새 약속·참여·일정·결과·장소) |
 | `store.js` | 저장소 (Supabase 함수 또는 체험 모드 localStorage) |
 | `data.js` | 여행지, 공휴일 |
+| `assets/icons/` | 3D 아이콘 12종 (webp) |
 | `regions.js` | 시·도/시·군·구 목록, 중심 좌표, 지도 모양 (`scripts/gen_regions.py`로 생성) |
 | `config.js` | Supabase 연결 정보 |
 | `supabase/schema.sql` | 테이블과 비밀번호 확인 함수 |
