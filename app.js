@@ -110,12 +110,28 @@ function toast(msg) {
 }
 
 // ---------- 라우팅 ----------
+// 주소창 해시를 쓸 수 없는 환경(미리보기 등)에서는 메모리 안에서만 화면을 바꾼다
+const memoryRouter = Boolean(window.PROMISE_CAL_MEMORY_ROUTER);
+let memoryHash = '';
+const currentHash = () => (memoryRouter ? memoryHash : location.hash);
+function nav(hash) {
+  if (!memoryRouter) { location.hash = hash; return; }
+  memoryHash = hash;
+  route();
+  window.scrollTo(0, 0);
+}
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="#"]');
+  if (!a || !memoryRouter) return;
+  e.preventDefault();
+  nav(a.getAttribute('href'));
+});
 window.addEventListener('hashchange', route);
 route();
 
 async function route() {
   closeSheet();
-  const hash = decodeURIComponent(location.hash);
+  const hash = decodeURIComponent(currentHash());
   if (hash.startsWith('#/new')) return renderNew();
   const join = hash.match(/^#\/join(?:\/(.+))?/);
   if (join) return renderJoin(join[1] || '');
@@ -125,7 +141,7 @@ async function route() {
   renderHome();
 }
 
-const goPromise = (code) => { location.hash = '#/p/' + encodeURIComponent(code); };
+const goPromise = (code) => nav('#/p/' + encodeURIComponent(code));
 
 // ---------- 홈 ----------
 function renderHome() {
@@ -354,7 +370,7 @@ async function refresh() {
 }
 
 setInterval(async () => {
-  if (!state.promise || !location.hash.startsWith('#/p/') || document.hidden || state.sheet || state.shuffling) return;
+  if (!state.promise || !currentHash().startsWith('#/p/') || document.hidden || state.sheet || state.shuffling) return;
   const focused = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName);
   try {
     if (await refresh() && !focused) render();
@@ -616,7 +632,7 @@ function bindMine() {
       else await store.leavePromise(state.promise.code, state.password, state.me);
       store.sessions.remove(state.promise.code);
       state.promise = null;
-      location.hash = '';
+      nav('');
     } catch (e) {
       toast('실패했어요: ' + e.message);
     }
