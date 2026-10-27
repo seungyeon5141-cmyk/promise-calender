@@ -1,41 +1,94 @@
 -- Supabase SQL Editor 에 붙여넣고 실행하세요.
+-- 로그인 없이 "참여코드 + 비밀번호"로 들어오는 구조입니다.
+-- 테이블은 직접 접근할 수 없고, 비밀번호를 확인하는 함수(RPC)로만 읽고 쓸 수 있어요.
+
+create extension if not exists pgcrypto with schema extensions;
 
 create table if not exists promises (
-  id text primary key,
-  owner uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  code text primary key,
+  pw_hash text not null,
   data jsonb not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-create table if not exists participants (
-  promise_id text not null references promises(id) on delete cascade,
-  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+create table if not exists members (
+  code text not null references promises(code) on delete cascade,
   name text not null,
-  avatar text,
   data jsonb not null default '{}',
   joined_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (promise_id, user_id)
+  primary key (code, name)
 );
 
--- 내가 이 약속의 참여자인지 (RLS 정책 안에서 재귀 없이 쓰기 위한 함수)
-create or replace function is_member(pid text) returns boolean
-language sql security definer stable set search_path = public as $$
-  select exists (select 1 from participants where promise_id = pid and user_id = auth.uid());
-$$;
-
+-- 정책을 만들지 않으므로 anon 키로는 테이블에 직접 접근 불가
 alter table promises enable row level security;
-alter table participants enable row level security;
+alter table members enable row level security;
 
--- 약속: 참여자만 보고 수정, 만든 사람만 삭제
-create policy "promise read"   on promises for select to authenticated using (owner = auth.uid() or is_member(id));
-create policy "promise insert" on promises for insert to authenticated with check (owner = auth.uid());
-create policy "promise update" on promises for update to authenticated using (is_member(id));
-create policy "promise delete" on promises for delete to authenticated using (owner = auth.uid());
+create or replace function _check_pw(p_code text, p_password text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if not exists (select 1 from promises where code = p_code and pw_hash = crypt(p_password, pw_hash)) then
+    raise exception 'WRONG_CODE_OR_PASSWORD';
+  end if;
+end $$;
+revoke execute on function _check_pw(text, text) from public, anon, authenticated;
 
--- 참여자: 초대 링크(약속 ID)를 아는 로그인 사용자는 스스로 참여 가능, 내 행만 수정
-create policy "member read"   on participants for select to authenticated using (is_member(promise_id));
-create policy "member join"   on participants for insert to authenticated with check (user_id = auth.uid());
-create policy "member update" on participants for update to authenticated using (user_id = auth.uid());
-create policy "member leave"  on participants for delete to authenticated using (user_id = auth.uid());
+create or replace function create_promise(p_code text, p_password text, p_data jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if length(p_code) < 2 or length(p_password) < 4 then
+    raise exception 'INVALID_INPUT';
+  end if;
+  insert into promises (code, pw_hash, data) values (p_code, crypt(p_password, gen_salt('bf')), p_data);
+exception when unique_violation then
+  raise exception 'CODE_TAKEN';
+end $$;
+
+create or replace function open_promise(p_code text, p_password text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform _check_pw(p_code, p_password);
+  return jsonb_build_object(
+    'data', (select data from promises where code = p_code),
+    'people', coalesce((
+      select jsonb_agg(jsonb_build_object('name', name, 'data', data) order by joined_at)
+      from members where code = p_code
+    ), '[]'::jsonb)
+  );
+end $$;
+
+create or replace function join_promise(p_code text, p_password text, p_name text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform _check_pw(p_code, p_password);
+  insert into members (code, name) values (p_code, p_name) on conflict do nothing;
+end $$;
+
+create or replace function save_member(p_code text, p_password text, p_name text, p_data jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform _check_pw(p_code, p_password);
+  update members set data = p_data, updated_at = now() where code = p_code and name = p_name;
+end $$;
+
+create or replace function save_promise_data(p_code text, p_password text, p_data jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform _check_pw(p_code, p_password);
+  update promises set data = p_data, updated_at = now() where code = p_code;
+end $$;
+
+create or replace function leave_promise(p_code text, p_password text, p_name text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform _check_pw(p_code, p_password);
+  delete from members where code = p_code and name = p_name;
+end $$;
+
+create or replace function delete_promise(p_code text, p_password text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform _check_pw(p_code, p_password);
+  delete from promises where code = p_code;
+end $$;

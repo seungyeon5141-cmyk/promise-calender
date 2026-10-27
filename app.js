@@ -24,8 +24,10 @@ const PLACE_MODES = {
 };
 
 const state = {
-  user: null,
+  me: null,
+  password: '',
   promise: null,
+  justCreated: false,
   tab: 'mine',
   preview: false,
   selected: null,
@@ -62,41 +64,39 @@ function daysOf(months) {
   return out;
 }
 
-function randomId() {
-  const bytes = crypto.getRandomValues(new Uint8Array(10));
-  return Array.from(bytes, (b) => (b % 36).toString(36)).join('');
+function randomCode() {
+  const words = ['보라', '토끼', '딸기', '구름', '별빛', '라떼', '모찌', '젤리'];
+  return words[Math.floor(Math.random() * words.length)] + String(Math.floor(Math.random() * 9000) + 1000);
 }
+
+const normCode = (s) => String(s || '').trim().replace(/\s+/g, '').toLowerCase();
 
 // ---------- 공통 UI ----------
 function avatar(p, size = 32) {
   const name = p.name || '?';
   const color = AVATAR_COLORS[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
-  const inner = p.avatar
-    ? `<img src="${esc(p.avatar)}" alt="" referrerpolicy="no-referrer">`
-    : esc([...name][0]);
-  return `<span class="avatar" style="--size:${size}px;--c:${color}" title="${esc(name)}">${inner}</span>`;
+  return `<span class="avatar" style="--size:${size}px;--c:${color}" title="${esc(name)}">${esc([...name][0])}</span>`;
 }
 
 function topbar() {
   return `
     <div class="topbar">
       <a href="#" class="logo">💜 약속잡기</a>
-      <div class="me">
-        ${avatar(state.user, 30)}
-        <span class="small">${esc(state.user.name)}</span>
-        <button class="link small" id="logout">로그아웃</button>
-      </div>
+      ${state.me && state.promise ? `
+        <div class="me">
+          ${avatar({ name: state.me }, 30)}
+          <span class="small">${esc(state.me)}</span>
+          <button class="link small" id="switch-me">이름 변경</button>
+        </div>` : ''}
     </div>
-    ${store.isShared ? '' : '<div class="notice">🧪 <b>체험 모드</b> · 구글 로그인 대신 닉네임으로 들어왔어요. 데이터는 이 브라우저에만 저장돼요.</div>'}`;
+    ${store.isShared ? '' : '<div class="notice">🧪 <b>체험 모드</b> · 데이터가 이 브라우저에만 저장돼요. 친구들과 쓰려면 README의 Supabase 설정을 해주세요.</div>'}`;
 }
 
 function bindTopbar() {
-  $('#logout')?.addEventListener('click', async () => {
-    await store.signOut();
-    state.user = null;
-    state.promise = null;
-    location.hash = '';
-    route();
+  $('#switch-me')?.addEventListener('click', () => {
+    store.sessions.set(state.promise.code, { name: null });
+    state.me = null;
+    render();
   });
 }
 
@@ -111,120 +111,73 @@ function toast(msg) {
 
 // ---------- 라우팅 ----------
 window.addEventListener('hashchange', route);
-init();
-
-async function init() {
-  if (store.isShared && new URLSearchParams(location.search).has('code')) {
-    await store.currentUser(); // OAuth 코드 교환 완료 대기
-    const back = store.local.get('after-login') || '';
-    store.local.set('after-login', null);
-    history.replaceState(null, '', location.pathname + back);
-  }
-  route();
-}
+route();
 
 async function route() {
   closeSheet();
-  try {
-    state.user = await store.currentUser();
-  } catch (e) {
-    app.innerHTML = `<div class="card center">로그인 정보를 불러오지 못했어요 😢<br><span class="muted small">${esc(e.message)}</span></div>`;
-    return;
-  }
-  if (!state.user) return renderLogin();
-  if (location.hash.startsWith('#/new')) return renderNew();
-  const m = location.hash.match(/^#\/p\/([a-z0-9]+)/);
-  if (m) return openPromise(m[1]);
+  const hash = decodeURIComponent(location.hash);
+  if (hash.startsWith('#/new')) return renderNew();
+  const join = hash.match(/^#\/join(?:\/(.+))?/);
+  if (join) return renderJoin(join[1] || '');
+  const open = hash.match(/^#\/p\/(.+)/);
+  if (open) return openPromise(open[1]);
   state.promise = null;
   renderHome();
 }
 
-// ---------- 로그인 ----------
-function renderLogin() {
-  const invited = /^#\/p\//.test(location.hash);
-  app.innerHTML = `
-    <section class="login">
-      <div class="mascot">🐰<span>💜</span></div>
-      <h1>약속잡기</h1>
-      <p class="muted">${invited ? '친구가 약속에 초대했어요! 💌<br>로그인하면 바로 참여돼요.' : '친구들이랑 날짜도, 장소도<br>한 번에 정해요'}</p>
-      ${store.isShared ? `
-        <button class="btn google" id="google">
-          <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2c-2 1.5-4.6 2.4-7.2 2.4-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
-          Google로 시작하기
-        </button>` : `
-        <form id="local-login" class="card">
-          <p class="small muted">🧪 체험 모드예요. Supabase를 연결하면 구글 로그인 버튼으로 바뀌어요.</p>
-          <input name="name" placeholder="닉네임 (예: 승연)" maxlength="12" required>
-          <button class="btn primary block" type="submit">시작하기</button>
-        </form>`}
-    </section>`;
-  $('#google')?.addEventListener('click', async () => {
-    try { await store.signInGoogle(); } catch (e) { toast('로그인 실패: ' + e.message); }
-  });
-  $('#local-login')?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    store.signInLocal(e.target.name.value.trim());
-    route();
-  });
-}
+const goPromise = (code) => { location.hash = '#/p/' + encodeURIComponent(code); };
 
-// ---------- 홈: 내 약속 목록 ----------
-async function renderHome() {
-  app.innerHTML = `${topbar()}<p class="center muted">불러오는 중…</p>`;
-  bindTopbar();
-  let list;
-  try {
-    list = await store.listPromises(state.user);
-  } catch (e) {
-    app.innerHTML = `${topbar()}<div class="card center">약속을 불러오지 못했어요 😢<br><span class="muted small">${esc(e.message)}</span></div>`;
-    bindTopbar();
-    return;
-  }
-  list.sort((a, b) => (b.data.createdAt || '').localeCompare(a.data.createdAt || ''));
+// ---------- 홈 ----------
+function renderHome() {
+  const recent = Object.entries(store.sessions.all())
+    .sort(([, a], [, b]) => (b.at || '').localeCompare(a.at || ''));
   app.innerHTML = `
     ${topbar()}
+    <section class="hero">
+      <div class="mascot">🐰<span>💜</span></div>
+      <h1>약속잡기</h1>
+      <p class="muted">약속마다 친구들을 따로 모아서<br>날짜도, 장소도 한 번에 정해요</p>
+    </section>
     <a href="#/new" class="new-btn">
       <span class="plus">＋</span>
-      <span><b>새 약속 만들기</b><br><span class="small">친구들마다 따로따로 잡아요</span></span>
+      <span><b>새 약속 만들기</b><br><span class="small">방장이 참여코드와 비밀번호를 정해요</span></span>
     </a>
-    <h2 class="section-title">내 약속 <span class="count">${list.length}</span></h2>
-    ${list.length ? list.map(promiseCard).join('') : `
-      <div class="empty card">
-        <div class="big-emoji">🗓️</div>
-        <p>아직 약속이 없어요.<br>새 약속을 만들고 친구들을 초대해 보세요!</p>
-      </div>`}`;
+    <a href="#/join" class="join-btn card">
+      <span class="plus soft">🔑</span>
+      <span><b>참여코드로 들어가기</b><br><span class="small muted">친구한테 받은 코드와 비밀번호를 입력해요</span></span>
+    </a>
+    ${recent.length ? `
+      <h2 class="section-title">최근 들어간 약속 <span class="count">${recent.length}</span></h2>
+      ${recent.map(([code, s]) => `
+        <a class="p-card card" href="#/p/${encodeURIComponent(code)}">
+          <span class="p-emoji">${esc(s.emoji || '💜')}</span>
+          <span class="p-body">
+            <b>${esc(s.title || code)}</b>
+            <span class="small muted">코드 ${esc(code)}${s.name ? ` · ${esc(s.name)}(으)로 참여 중` : ''}</span>
+          </span>
+          <span class="pill">열기 →</span>
+        </a>`).join('')}` : ''}`;
   bindTopbar();
-}
-
-function promiseCard(p) {
-  const done = p.people.filter((x) => x.data?.done).length;
-  const ready = allDone(p);
-  return `
-    <a class="p-card card" href="#/p/${p.id}">
-      <span class="p-emoji">${esc(p.data.emoji || '💜')}</span>
-      <span class="p-body">
-        <b>${esc(p.data.title)}</b>
-        <span class="small muted">${monthsText(p.data.months)}</span>
-        <span class="avatars">${p.people.slice(0, 6).map((x) => avatar(x, 24)).join('')}${p.people.length > 6 ? `<span class="small muted">+${p.people.length - 6}</span>` : ''}</span>
-      </span>
-      <span class="pill ${ready ? 'ready' : ''}">${ready ? '📅 날짜 나왔어요' : `✍️ ${done}/${Math.max(p.people.length, p.data.expected || 0)} 완료`}</span>
-    </a>`;
 }
 
 // ---------- 새 약속 ----------
 function renderNew() {
-  const f = state.newForm ??= { title: '', emoji: '💜', months: [], expected: 0 };
+  const f = state.newForm ??= {
+    title: '', emoji: '💜', months: [], expected: 0, code: randomCode(), password: '', host: '',
+  };
   const now = new Date();
   const options = Array.from({ length: 12 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
   });
   const byYear = options.reduce((acc, ym) => ((acc[ym.slice(0, 4)] ??= []).push(ym), acc), {});
+  const counts = Array.from({ length: 9 }, (_, i) => i + 2);
+  const custom = f.expected > 10;
 
   app.innerHTML = `
     ${topbar()}
-    <a href="#" class="back">← 내 약속</a>
-    <form class="card" id="new-form">
+    <a href="#" class="back">← 처음으로</a>
+    <form class="card" id="new-form" novalidate>
       <h2>✨ 새 약속</h2>
       <label>약속 이름
         <input name="title" required maxlength="30" placeholder="예: 대학 동기 송년회" value="${esc(f.title)}">
@@ -244,19 +197,41 @@ function renderNew() {
           </div>`).join('')}
       </div>
       <div class="field">
-        <span class="field-label">몇 명이 모여요? <span class="muted small">(이 인원이 모두 입력 완료하면 결과가 열려요)</span></span>
-        <div class="stepper">
-          <button type="button" data-step="-1" aria-label="줄이기">－</button>
-          <span id="expected">${f.expected ? `${f.expected}명` : '아직 몰라요'}</span>
-          <button type="button" data-step="1" aria-label="늘리기">＋</button>
+        <span class="field-label">몇 명이 모여요? <span class="muted small">(모두 입력 완료하면 가능한 날이 열려요)</span></span>
+        <div class="count-grid">
+          ${counts.map((n) => `<button type="button" class="count-btn ${f.expected === n ? 'on' : ''}" data-count="${n}">${n}명</button>`).join('')}
+          <button type="button" class="count-btn ${custom ? 'on' : ''}" data-count="custom">더 많이</button>
+        </div>
+        <div class="custom-count ${custom ? '' : 'hidden'}">
+          <input name="customCount" type="number" min="2" inputmode="numeric" placeholder="인원 수" value="${custom ? f.expected : ''}">
+          <span>명</span>
         </div>
       </div>
-      <button class="btn primary block" type="submit">약속 만들고 친구 초대하기 💌</button>
+      <div class="field key-box">
+        <span class="field-label">🔑 친구들이 들어올 때 쓸 정보</span>
+        <label>참여코드
+          <div class="add-row">
+            <input name="code" required maxlength="20" value="${esc(f.code)}" autocomplete="off">
+            <button type="button" class="btn" id="dice" aria-label="랜덤 코드">🎲</button>
+          </div>
+        </label>
+        <label>비밀번호 <span class="muted small">(4자 이상)</span>
+          <input name="password" required minlength="4" maxlength="20" value="${esc(f.password)}" autocomplete="off" placeholder="친구들과 공유할 비밀번호">
+        </label>
+        <label>방장 이름 (내 이름)
+          <input name="host" required maxlength="12" value="${esc(f.host)}" placeholder="예: 승연">
+        </label>
+      </div>
+      <p class="small warn" id="form-error"></p>
+      <button class="btn primary block" type="submit">약속 만들기 💌</button>
     </form>`;
   bindTopbar();
 
   const form = $('#new-form');
-  form.title.addEventListener('input', (e) => { f.title = e.target.value; });
+  for (const name of ['title', 'code', 'password', 'host']) {
+    form[name].addEventListener('input', (e) => { f[name] = e.target.value; });
+  }
+  $('#dice').addEventListener('click', () => { f.code = randomCode(); form.code.value = f.code; });
   $$('[data-emoji]').forEach((b) => b.addEventListener('click', () => {
     f.emoji = b.dataset.emoji;
     $$('[data-emoji]').forEach((x) => x.classList.toggle('on', x === b));
@@ -266,58 +241,112 @@ function renderNew() {
     f.months = f.months.includes(ym) ? f.months.filter((x) => x !== ym) : [...f.months, ym].sort();
     b.classList.toggle('on');
   }));
-  $$('[data-step]').forEach((b) => b.addEventListener('click', () => {
-    f.expected = Math.min(30, Math.max(0, f.expected + Number(b.dataset.step)));
-    if (f.expected === 1) f.expected = Number(b.dataset.step) > 0 ? 2 : 0;
-    $('#expected').textContent = f.expected ? `${f.expected}명` : '아직 몰라요';
+  $$('[data-count]').forEach((b) => b.addEventListener('click', () => {
+    $$('[data-count]').forEach((x) => x.classList.toggle('on', x === b));
+    const isCustom = b.dataset.count === 'custom';
+    $('.custom-count').classList.toggle('hidden', !isCustom);
+    if (isCustom) {
+      f.expected = Number(form.customCount.value) || 0;
+      form.customCount.focus();
+    } else f.expected = Number(b.dataset.count);
   }));
+  form.customCount.addEventListener('input', (e) => { f.expected = Number(e.target.value) || 0; });
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!f.months.length) { toast('약속 잡을 달을 하나 이상 골라주세요'); return; }
-    const id = randomId();
+    const code = normCode(f.code);
+    const error = !f.title.trim() ? '약속 이름을 적어주세요'
+      : !f.months.length ? '약속 잡을 달을 하나 이상 골라주세요'
+      : f.expected < 2 ? '모일 인원을 골라주세요 (2명 이상)'
+      : code.length < 2 || /[/#?]/.test(code) ? '참여코드는 2자 이상, / # ? 없이 적어주세요'
+      : f.password.length < 4 ? '비밀번호는 4자 이상이어야 해요'
+      : !f.host.trim() ? '방장 이름을 적어주세요' : '';
+    $('#form-error').textContent = error;
+    if (error) return;
     const data = {
       title: f.title.trim(), emoji: f.emoji, months: f.months, expected: f.expected,
-      place: null, createdAt: new Date().toISOString(),
+      host: f.host.trim(), place: null, createdAt: new Date().toISOString(),
     };
+    const btn = form.querySelector('[type=submit]');
+    btn.disabled = true;
+    try {
+      await store.createPromise(code, f.password, data);
+      await store.joinPromise(code, f.password, data.host);
+      store.sessions.set(code, { password: f.password, name: data.host, title: data.title, emoji: data.emoji });
+      state.newForm = null;
+      state.justCreated = true;
+      goPromise(code);
+    } catch (err) {
+      $('#form-error').textContent = err.message;
+      btn.disabled = false;
+    }
+  });
+}
+
+// ---------- 참여하기 ----------
+function renderJoin(prefill, message = '') {
+  app.innerHTML = `
+    ${topbar()}
+    <a href="#" class="back">← 처음으로</a>
+    <form class="card join-card" id="join-form">
+      <div class="big-emoji">🔑</div>
+      <h2>약속에 들어가기</h2>
+      <p class="small muted">방장에게 받은 참여코드와 비밀번호를 입력해요</p>
+      <label>참여코드
+        <input name="code" required maxlength="20" value="${esc(prefill)}" autocomplete="off" placeholder="예: 보라1234">
+      </label>
+      <label>비밀번호
+        <input name="password" type="password" required maxlength="20" autocomplete="off">
+      </label>
+      <p class="small warn" id="join-error">${esc(message)}</p>
+      <button class="btn primary block" type="submit">들어가기</button>
+    </form>`;
+  bindTopbar();
+  const form = $('#join-form');
+  (prefill ? form.password : form.code).focus();
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const code = normCode(form.code.value);
+    const password = form.password.value;
     form.querySelector('[type=submit]').disabled = true;
     try {
-      await store.createPromise(state.user, id, data);
-      state.newForm = null;
-      location.hash = '#/p/' + id;
+      const p = await store.openPromise(code, password);
+      store.sessions.set(code, { password, title: p.data.title, emoji: p.data.emoji });
+      goPromise(code);
     } catch (err) {
-      toast('약속을 만들지 못했어요: ' + err.message);
+      $('#join-error').textContent = err.message;
       form.querySelector('[type=submit]').disabled = false;
     }
   });
 }
 
 // ---------- 약속 화면 ----------
-async function openPromise(id) {
-  if (state.promise?.id !== id) {
+async function openPromise(rawCode) {
+  const code = normCode(rawCode);
+  const session = store.sessions.get(code);
+  if (!session?.password) return renderJoin(code);
+  if (state.promise?.code !== code) {
     state.tab = 'mine';
     state.preview = false;
     state.selected = null;
   }
   app.innerHTML = `${topbar()}<p class="center muted">불러오는 중…</p>`;
-  bindTopbar();
   try {
-    await store.joinPromise(id, state.user);
-    state.promise = await store.loadPromise(id);
+    state.promise = await store.openPromise(code, session.password);
   } catch (e) {
     state.promise = null;
+    store.sessions.remove(code);
+    return renderJoin(code, e.message);
   }
-  if (!state.promise) {
-    app.innerHTML = `${topbar()}<div class="card center empty"><div class="big-emoji">🥲</div><p>약속을 찾을 수 없어요.</p><a class="btn" href="#">내 약속으로</a></div>`;
-    bindTopbar();
-    return;
-  }
+  state.password = session.password;
+  state.me = state.promise.people.some((p) => p.name === session.name) ? session.name : null;
+  store.sessions.set(code, { title: state.promise.data.title, emoji: state.promise.data.emoji });
   render();
 }
 
 async function refresh() {
-  const p = await store.loadPromise(state.promise.id);
-  if (!p) return false;
-  const mine = p.people.find((x) => x.user_id === state.user.id);
+  const p = await store.openPromise(state.promise.code, state.password);
+  const mine = p.people.find((x) => x.name === state.me);
   if (state.dirty && mine) mine.data = myData();
   const changed = JSON.stringify(p) !== JSON.stringify(state.promise);
   state.promise = p;
@@ -333,7 +362,7 @@ setInterval(async () => {
 }, 8000);
 
 function meRow() {
-  return state.promise.people.find((p) => p.user_id === state.user.id);
+  return state.promise.people.find((p) => p.name === state.me);
 }
 
 function myData() {
@@ -343,9 +372,10 @@ function myData() {
   return row.data;
 }
 
+const needCount = (p = state.promise) => Math.max(p.data.expected || 0, p.people.length, 2);
+
 function allDone(p = state.promise) {
-  const need = Math.max(p.data.expected || 0, 2);
-  return p.people.length >= need && p.people.every((x) => x.data?.done);
+  return p.people.length >= needCount(p) && p.people.every((x) => x.data?.done);
 }
 
 function queueSave() {
@@ -355,7 +385,7 @@ function queueSave() {
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(async () => {
     try {
-      await store.saveMine(state.promise.id, state.user, myData());
+      await store.saveMember(state.promise.code, state.password, state.me, myData());
       state.dirty = false;
       state.saveStatus = '저장됨 ✓';
     } catch {
@@ -373,33 +403,44 @@ function updateSaveStatus() {
 function render() {
   const p = state.promise;
   const done = p.people.filter((x) => x.data?.done).length;
-  const total = Math.max(p.people.length, p.data.expected || 0);
+  const total = needCount();
   app.innerHTML = `
     ${topbar()}
-    <a href="#" class="back">← 내 약속</a>
+    <a href="#" class="back">← 처음으로</a>
     <header class="p-head card">
       <span class="p-emoji big">${esc(p.data.emoji || '💜')}</span>
       <div class="p-info">
         <h1>${esc(p.data.title)}</h1>
-        <p class="small muted">${monthsText(p.data.months)}</p>
+        <p class="small muted">${monthsText(p.data.months)} · ${p.data.expected}명 모임 · 방장 ${esc(p.data.host)}</p>
         <div class="people">
           ${p.people.map((x) => `<span class="person ${x.data?.done ? 'done' : ''}">${avatar(x, 30)}<span>${esc(x.name)}</span></span>`).join('')}
           ${p.data.expected > p.people.length ? `<span class="person ghost"><span class="avatar" style="--size:30px">?</span><span>${p.data.expected - p.people.length}명 더</span></span>` : ''}
         </div>
       </div>
-      <button class="btn invite" id="invite">💌 친구 초대</button>
+      <button class="btn invite" id="invite">💌 참여코드 공유하기</button>
     </header>
-    <nav class="tabs">
-      ${tabBtn('mine', '📅 내 일정')}
-      ${tabBtn('result', `💜 가능한 날${allDone() ? '' : ` <small>${done}/${total}</small>`}`)}
-      ${tabBtn('place', '📍 장소 정하기')}
-    </nav>
-    <main>${{ mine: renderMine, result: renderResult, place: renderPlace }[state.tab]()}</main>`;
+    ${state.justCreated && state.me === p.data.host ? `
+      <section class="card key-card">
+        <h3>🎉 약속이 만들어졌어요!</h3>
+        <p class="small muted">아래 정보를 단톡방에 보내면 친구들이 들어올 수 있어요</p>
+        <div class="key-row"><span>참여코드</span><b>${esc(p.code)}</b></div>
+        <div class="key-row"><span>비밀번호</span><b>${esc(state.password)}</b></div>
+      </section>` : ''}
+    ${state.me ? `
+      <nav class="tabs">
+        ${tabBtn('mine', '📅 내 일정')}
+        ${tabBtn('result', `💜 가능한 날${allDone() ? '' : ` <small>${done}/${total}</small>`}`)}
+        ${tabBtn('place', '📍 장소 정하기')}
+      </nav>
+      <main>${{ mine: renderMine, result: renderResult, place: renderPlace }[state.tab]()}</main>`
+    : renderWhoAmI()}`;
 
   bindTopbar();
   $('#invite').addEventListener('click', invite);
+  if (!state.me) return bindWhoAmI();
   $$('[data-tab]').forEach((b) => b.addEventListener('click', () => {
     state.tab = b.dataset.tab;
+    state.justCreated = false;
     render();
     window.scrollTo({ top: $('.tabs').offsetTop - 8, behavior: 'smooth' });
   }));
@@ -408,17 +449,61 @@ function render() {
 
 const tabBtn = (id, label) => `<button class="tab ${state.tab === id ? 'on' : ''}" data-tab="${id}">${label}</button>`;
 
+function renderWhoAmI() {
+  const people = state.promise.people;
+  return `
+    <section class="card whoami">
+      <div class="big-emoji">👋</div>
+      <h2>이름을 알려주세요!</h2>
+      <form class="add-row" id="name-form">
+        <input name="name" maxlength="12" placeholder="내 이름 (예: 민지)" required>
+        <button class="btn primary" type="submit">참여</button>
+      </form>
+      <p class="small warn" id="name-error"></p>
+      ${people.length ? `
+        <p class="small muted">이미 참여했다면 내 이름을 눌러서 이어서 입력해요</p>
+        <div class="name-chips">
+          ${people.map((p) => `<button class="name-chip" data-name="${esc(p.name)}">${avatar(p, 26)} ${esc(p.name)}</button>`).join('')}
+        </div>` : ''}
+    </section>`;
+}
+
+function bindWhoAmI() {
+  const enter = async (name, isNew) => {
+    try {
+      if (isNew) await store.joinPromise(state.promise.code, state.password, name);
+      store.sessions.set(state.promise.code, { name });
+      state.me = name;
+      await refresh();
+      state.tab = 'mine';
+      render();
+    } catch (e) {
+      $('#name-error').textContent = e.message;
+    }
+  };
+  $('#name-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = e.target.name.value.trim();
+    if (!name) return;
+    const exists = state.promise.people.some((p) => p.name === name);
+    if (exists && !confirm(`"${name}" 님이 이미 있어요. 본인이 맞나요?`)) return;
+    enter(name, !exists);
+  });
+  $$('[data-name]').forEach((b) => b.addEventListener('click', () => enter(b.dataset.name, false)));
+}
+
 async function invite() {
-  const url = `${location.origin}${location.pathname}#/p/${state.promise.id}`;
-  const text = `💜 [${state.promise.data.title}] 약속 잡자! 링크 들어가서 안 되는 날 표시해줘 🙏`;
+  const p = state.promise;
+  const url = `${location.origin}${location.pathname}#/join/${encodeURIComponent(p.code)}`;
+  const text = `💜 [${p.data.title}] 약속 잡자!\n참여코드: ${p.code}\n비밀번호: ${state.password}\n안 되는 날 표시해줘 🙏`;
   if (navigator.share) {
-    try { await navigator.share({ title: state.promise.data.title, text, url }); return; } catch { /* 취소 */ }
+    try { await navigator.share({ title: p.data.title, text, url }); return; } catch { /* 취소 */ }
   }
   try {
     await navigator.clipboard.writeText(`${text}\n${url}`);
-    toast('초대 링크를 복사했어요! 단톡방에 붙여넣어 주세요 💌');
+    toast('참여코드와 비밀번호를 복사했어요! 단톡방에 붙여넣어 주세요 💌');
   } catch {
-    prompt('이 링크를 복사해서 친구들에게 보내주세요', url);
+    prompt('복사해서 친구들에게 보내주세요', `${text}\n${url}`);
   }
 }
 
@@ -454,7 +539,7 @@ const noteText = (e) => [timeText(e), e.memo].filter(Boolean).join(' · ');
 // ---------- 내 일정 탭 ----------
 function renderMine() {
   const mine = myData();
-  const isOwner = state.promise.owner === state.user.id;
+  const isOwner = state.promise.data.host === state.me;
   return `
     <section class="card guide">
       <div class="row between">
@@ -521,11 +606,12 @@ function bindMine() {
     render();
   });
   $('#leave').addEventListener('click', async () => {
-    const isOwner = state.promise.owner === state.user.id;
+    const isOwner = state.promise.data.host === state.me;
     if (!confirm(isOwner ? '약속을 삭제할까요? 모든 친구의 입력도 사라져요.' : '이 약속에서 나갈까요? 내 입력이 사라져요.')) return;
     try {
-      if (isOwner) await store.deletePromise(state.promise.id);
-      else await store.leavePromise(state.promise.id, state.user);
+      if (isOwner) await store.deletePromise(state.promise.code, state.password);
+      else await store.leavePromise(state.promise.code, state.password, state.me);
+      store.sessions.remove(state.promise.code);
       state.promise = null;
       location.hash = '';
     } catch (e) {
@@ -722,7 +808,7 @@ function renderResult() {
 
 function renderWaiting() {
   const p = state.promise;
-  const need = Math.max(p.data.expected || 0, p.people.length, 2);
+  const need = needCount();
   const done = p.people.filter((x) => x.data?.done).length;
   const mine = myData();
   return `
@@ -928,11 +1014,11 @@ async function pick() {
   });
   box.classList.remove('rolling');
   state.shuffling = false;
-  const result = { mode, picks, by: state.user.name, at: new Date().toISOString() };
+  const result = { mode, picks, by: state.me, at: new Date().toISOString() };
   try {
     await refresh();
     state.promise.data.place = result;
-    await store.savePromiseData(state.promise.id, state.promise.data);
+    await store.savePromiseData(state.promise.code, state.password, state.promise.data);
   } catch {
     state.promise.data.place = result;
     toast('결과를 저장하지 못했어요');
