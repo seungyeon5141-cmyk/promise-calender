@@ -485,9 +485,7 @@ function bindWhoAmI() {
     e.preventDefault();
     const name = e.target.name.value.trim();
     if (!name) return;
-    const exists = state.promise.people.some((p) => p.name === name);
-    if (exists && !confirm(`"${name}" 님이 이미 있어요. 본인이 맞나요?`)) return;
-    enter(name, !exists);
+    enter(name, !state.promise.people.some((p) => p.name === name));
   });
   $$('[data-name]').forEach((b) => b.addEventListener('click', () => enter(b.dataset.name, false)));
 }
@@ -503,7 +501,7 @@ async function invite() {
     await navigator.clipboard.writeText(`${text}\n${url}`);
     toast('참여코드와 비밀번호를 복사했어요! 단톡방에 붙여넣어 주세요 💌');
   } catch {
-    prompt('복사해서 친구들에게 보내주세요', `${text}\n${url}`);
+    toast(`복사가 안 돼요. 직접 알려주세요 → 참여코드 ${p.code} / 비밀번호 ${state.password}`);
   }
 }
 
@@ -605,9 +603,14 @@ function bindMine() {
     queueSave();
     render();
   });
-  $('#leave').addEventListener('click', async () => {
+  $('#leave').addEventListener('click', async (e) => {
     const isOwner = state.promise.data.host === state.me;
-    if (!confirm(isOwner ? '약속을 삭제할까요? 모든 친구의 입력도 사라져요.' : '이 약속에서 나갈까요? 내 입력이 사라져요.')) return;
+    // 실수로 누르지 않도록 한 번 더 눌러야 실행
+    if (!e.currentTarget.dataset.armed) {
+      e.currentTarget.dataset.armed = '1';
+      e.currentTarget.textContent = isOwner ? '⚠️ 한 번 더 누르면 모든 친구의 입력까지 삭제돼요' : '⚠️ 한 번 더 누르면 내 입력이 사라지고 나가져요';
+      return;
+    }
     try {
       if (isOwner) await store.deletePromise(state.promise.code, state.password);
       else await store.leavePromise(state.promise.code, state.password, state.me);
