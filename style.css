@@ -558,3 +558,17 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   .prov-grid { grid-template-columns: repeat(5, 1fr); }
   .seg button { font-size: 0.78rem; }
 }
+
+/* 일정 확정 */
+.confirmed { text-align: center; background: linear-gradient(160deg, #fff 0%, var(--primary-soft) 100%); border-color: var(--primary); }
+.confirmed .eyebrow { margin: 0; font-size: 0.82rem; font-weight: 800; color: var(--primary-strong); letter-spacing: 0.02em; }
+.confirmed .when { margin: 4px 0 0; font-family: var(--font-cute); font-size: 1.6rem; color: var(--text); }
+.confirmed .where { margin: 2px 0 0; font-weight: 700; }
+.cal-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0 8px; }
+.cal-buttons .btn { padding: 12px 8px; font-size: 0.9rem; color: var(--text); text-decoration: none; }
+.btn.gcal { border-color: #c9dafc; }
+.confirm-form { margin-top: 12px; padding: 12px 14px; background: var(--primary-softer); border: 2px dashed var(--primary); border-radius: 16px; }
+.confirm-form h4 { margin: 0 0 4px; }
+.confirm-form label { margin: 10px 0; }
+.confirm-form input, .confirm-form select { background: #fff; }
+@media (max-width: 360px) { .cal-buttons { grid-template-columns: 1fr; } }

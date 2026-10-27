@@ -45,6 +45,7 @@ const state = {
   searchResults: null,
   shuffling: false,
   newForm: null,
+  confirmDraft: null,
 };
 
 // ---------- 날짜 유틸 ----------
@@ -471,6 +472,7 @@ function render() {
         <div class="key-row"><span>참여코드</span><b>${esc(p.code)}</b></div>
         <div class="key-row"><span>비밀번호</span><b>${esc(state.password)}</b></div>
       </section>` : ''}
+    ${state.me ? confirmedBanner() : ''}
     ${state.me ? `
       <nav class="tabs">
         ${tabBtn('mine', '📅 내 일정')}
@@ -483,6 +485,7 @@ function render() {
   bindTopbar();
   $('#invite').addEventListener('click', invite);
   if (!state.me) return bindWhoAmI();
+  bindConfirmedBanner();
   $$('[data-tab]').forEach((b) => b.addEventListener('click', () => {
     state.tab = b.dataset.tab;
     state.justCreated = false;
@@ -890,16 +893,176 @@ function detail(k) {
     <section class="card detail">
       <div class="row between"><h3>${fmtDay(k)} ${HOLIDAYS[k] ? `<em>${esc(HOLIDAYS[k])}</em>` : ''}</h3><button class="link" id="close-detail" aria-label="닫기">✕</button></div>
       <ul class="detail-list">${people.join('')}</ul>
+      ${confirmForm(k)}
     </section>`;
+}
+
+// ---------- 일정 확정 ----------
+const TIMES = Array.from({ length: 31 }, (_, i) => `${pad(Math.floor(i / 2) + 7)}:${i % 2 ? '30' : '00'}`); // 07:00 ~ 22:00
+
+function confirmForm(k) {
+  const c = state.promise.data.confirmed;
+  if (state.confirmDraft?.date !== k) {
+    const already = c?.date === k;
+    return `<button class="btn primary block" id="open-confirm">${already ? '📌 확정된 날이에요 · 시간/장소 바꾸기' : '📌 이 날로 확정하기'}</button>`;
+  }
+  const d = state.confirmDraft;
+  const placeTop = state.promise.data.place?.picks?.[0]?.name || '';
+  return `
+    <form class="confirm-form" id="confirm-form">
+      <h4>📌 ${fmtDay(k)}로 확정</h4>
+      <label>몇 시에 만나요?
+        <select id="confirm-time">
+          <option value="">시간 미정 (하루 종일)</option>
+          ${TIMES.map((t) => `<option ${d.time === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </label>
+      <label>어디서 만나요?
+        <input id="confirm-place" maxlength="40" value="${esc(d.place ?? placeTop)}" placeholder="예: 대전역 성심당 앞">
+      </label>
+      <div class="sheet-actions">
+        <button type="button" class="btn" id="cancel-confirm">닫기</button>
+        <button type="submit" class="btn primary">확정하기</button>
+      </div>
+    </form>`;
+}
+
+function bindConfirmForm() {
+  $('#open-confirm')?.addEventListener('click', () => {
+    const c = state.promise.data.confirmed;
+    state.confirmDraft = c?.date === state.selected ? { ...c } : { date: state.selected, time: '' };
+    render();
+    $('#confirm-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  $('#cancel-confirm')?.addEventListener('click', () => { state.confirmDraft = null; render(); });
+  $('#confirm-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const confirmed = {
+      date: state.confirmDraft.date,
+      time: $('#confirm-time').value,
+      place: $('#confirm-place').value.trim(),
+      by: state.me,
+      at: new Date().toISOString(),
+    };
+    await saveConfirmed(confirmed);
+    state.confirmDraft = null;
+    render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    toast('일정을 확정했어요! 캘린더에 추가해 보세요 📅');
+  });
+}
+
+async function saveConfirmed(confirmed) {
+  try {
+    await refresh();
+    state.promise.data.confirmed = confirmed;
+    await store.savePromiseData(state.promise.code, state.password, state.promise.data);
+  } catch {
+    state.promise.data.confirmed = confirmed;
+    toast('저장하지 못했어요. 다시 시도해 주세요');
+  }
+}
+
+// 한국 시간(UTC+9, 서머타임 없음) → UTC 문자열 20261114T090000Z
+function utcStamp(date, time, addHours = 0) {
+  const [y, m, d] = date.split('-').map(Number);
+  const [hh, mm] = time.split(':').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, hh - 9 + addHours, mm)).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+}
+
+function eventInfo() {
+  const p = state.promise;
+  const c = p.data.confirmed;
+  const nextDay = iso8601(addDay(c.date));
+  const allDay = !c.time;
+  return {
+    title: `${p.data.emoji || ''} ${p.data.title}`.trim(),
+    place: c.place || '',
+    details: `참여: ${p.people.map((x) => x.name).join(', ')}\n약속잡기 참여코드: ${p.code}`,
+    start: allDay ? c.date.replace(/-/g, '') : utcStamp(c.date, c.time),
+    end: allDay ? nextDay.replace(/-/g, '') : utcStamp(c.date, c.time, 2),
+    allDay,
+  };
+}
+
+const addDay = (k) => { const d = parseKey(k); d.setDate(d.getDate() + 1); return d; };
+const iso8601 = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+function googleCalendarUrl() {
+  const e = eventInfo();
+  const q = new URLSearchParams({ action: 'TEMPLATE', text: e.title, dates: `${e.start}/${e.end}`, details: e.details, location: e.place, ctz: 'Asia/Seoul' });
+  return `https://calendar.google.com/calendar/render?${q}`;
+}
+
+function downloadIcs() {
+  const e = eventInfo();
+  const icsText = (s) => s.replace(/\\/g, '\\\\').replace(/[,;]/g, (m) => `\\${m}`).replace(/\n/g, '\\n');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const lines = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//promise-calender//KO', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:${encodeURIComponent(state.promise.code)}-${state.promise.data.confirmed.date}@promise-calender`,
+    `DTSTAMP:${stamp}`,
+    e.allDay ? `DTSTART;VALUE=DATE:${e.start}` : `DTSTART:${e.start}`,
+    e.allDay ? `DTEND;VALUE=DATE:${e.end}` : `DTEND:${e.end}`,
+    `SUMMARY:${icsText(e.title)}`,
+    ...(e.place ? [`LOCATION:${icsText(e.place)}`] : []),
+    `DESCRIPTION:${icsText(e.details)}`,
+    'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-P1D', `DESCRIPTION:${icsText(e.title)} 하루 전이에요`, 'END:VALARM',
+    'END:VEVENT', 'END:VCALENDAR',
+  ];
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `yaksok-${state.promise.data.confirmed.date}.ics`;
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 10000);
+  toast('캘린더 파일을 열면 내 캘린더 앱에 추가돼요');
+}
+
+function confirmedBanner() {
+  const c = state.promise.data.confirmed;
+  if (!c) return '';
+  return `
+    <section class="card confirmed">
+      <p class="eyebrow">📌 약속이 확정됐어요</p>
+      <p class="when">${fmtDay(c.date)}${c.time ? ` ${c.time}` : ''}</p>
+      ${c.place ? `<p class="where">📍 ${esc(c.place)}</p>` : ''}
+      <div class="cal-buttons">
+        <a class="btn gcal" href="${esc(googleCalendarUrl())}" target="_blank" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3" fill="#fff" stroke="#4285F4" stroke-width="2"/><rect x="3" y="4" width="18" height="5" rx="2" fill="#4285F4"/><text x="12" y="18.5" font-size="8" font-weight="700" text-anchor="middle" fill="#4285F4">31</text></svg>
+          Google 캘린더
+        </a>
+        <button class="btn" id="ics">📱 기본 캘린더 앱</button>
+      </div>
+      <p class="small muted">${esc(c.by)} 님이 확정 · <button class="link small" id="unconfirm">확정 취소</button></p>
+    </section>`;
+}
+
+function bindConfirmedBanner() {
+  $('#ics')?.addEventListener('click', downloadIcs);
+  $('#unconfirm')?.addEventListener('click', async (e) => {
+    if (!e.currentTarget.dataset.armed) {
+      e.currentTarget.dataset.armed = '1';
+      e.currentTarget.textContent = '한 번 더 누르면 확정이 취소돼요';
+      return;
+    }
+    await saveConfirmed(null);
+    render();
+  });
 }
 
 function bindResult() {
   $('#go-mine')?.addEventListener('click', () => { state.tab = 'mine'; render(); });
   $('#invite2')?.addEventListener('click', invite);
   $('#peek')?.addEventListener('click', () => { state.preview = true; render(); });
-  $('#close-detail')?.addEventListener('click', () => { state.selected = null; render(); });
+  $('#close-detail')?.addEventListener('click', () => { state.selected = null; state.confirmDraft = null; render(); });
+  bindConfirmForm();
   $$('[data-date]').forEach((el) => el.addEventListener('click', () => {
     state.selected = el.dataset.date;
+    state.confirmDraft = null;
     render();
     $('#detail')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }));

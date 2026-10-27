@@ -11,7 +11,8 @@ store = strip(open(src+'store.js').read())
 names = re.findall(r"^export (?:async function|function|const) (\w+)", open(src+'store.js').read(), flags=re.M)
 parts = [
   "window.PROMISE_CAL_MEMORY_ROUTER = true;",
-  strip(open(src+'config.js').read()),
+  # 미리보기는 외부 서버에 접속할 수 없으므로 항상 체험 모드(빈 설정)로 만든다
+  "const SUPABASE_URL = '';\nconst SUPABASE_ANON_KEY = '';",
   strip(open(src+'data.js').read()),
   strip(open(src+'regions.js').read()),
   "const store = (() => {\n" + store + "\nreturn { " + ", ".join(names) + " };\n})();",
