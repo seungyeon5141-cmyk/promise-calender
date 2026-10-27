@@ -188,8 +188,11 @@ function renderNew() {
     title: '', emoji: '💜', months: [], expected: 0, code: randomCode(), password: '', host: '',
   };
   const now = new Date();
+  // 고를 수 있는 달: 이번 달부터 2년 뒤 같은 달까지 (앱을 연 날짜 기준으로 매일 자동으로 바뀜)
   const thisYm = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  const lastYm = `${now.getFullYear() + 2}-${pad(now.getMonth() + 1)}`;
   const years = [0, 1, 2].map((i) => now.getFullYear() + i);
+  f.months = f.months.filter((ym) => ym >= thisYm && ym <= lastYm);
   f.year ??= years[0];
   const counts = Array.from({ length: 9 }, (_, i) => i + 2);
   const custom = f.expected > 10;
@@ -217,11 +220,11 @@ function renderNew() {
             return `<button type="button" class="year-btn ${f.year === y ? 'on' : ''}" data-year="${y}">${y}년${n ? `<span class="badge">${n}</span>` : ''}</button>`;
           }).join('')}
         </div>
-        <p class="step-label">② 월 <span class="muted small">(여러 달 선택 가능)</span></p>
+        <p class="step-label">② 월 <span class="muted small">(여러 달 선택 가능 · ${lastYm.slice(0, 4)}년 ${Number(lastYm.slice(5))}월까지)</span></p>
         <div class="month-grid">
           ${Array.from({ length: 12 }, (_, i) => {
             const ym = `${f.year}-${pad(i + 1)}`;
-            const past = ym < thisYm;
+            const past = ym < thisYm || ym > lastYm;
             return `<button type="button" class="month-btn ${f.months.includes(ym) ? 'on' : ''}" data-ym="${ym}" ${past ? 'disabled' : ''}>${i + 1}월</button>`;
           }).join('')}
         </div>
