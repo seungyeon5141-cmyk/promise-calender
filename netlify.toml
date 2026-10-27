@@ -1,0 +1,8 @@
+# 빌드 없는 정적 사이트
+[build]
+  publish = "."
+  command = ""
+
+# config.js 의 Supabase anon 키는 공개용 키라서 비밀값 검사에서 제외
+[build.environment]
+  SECRETS_SCAN_OMIT_PATHS = "config.js"
